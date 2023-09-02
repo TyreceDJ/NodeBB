@@ -1,62 +1,95 @@
-"use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.get = exports.getData = void 0;
-const nconf_1 = __importDefault(require("nconf"));
-const user_1 = __importDefault(require("../user"));
-const categories_1 = __importDefault(require("../categories"));
-const topics_1 = __importDefault(require("../topics"));
-const meta_1 = __importDefault(require("../meta"));
-const helpers_1 = __importDefault(require("./helpers"));
-const pagination_1 = __importDefault(require("../pagination"));
-const privileges_1 = __importDefault(require("../privileges"));
+import { Request, Response, Locals, NextFunction } from 'express';
+import { ParsedQs } from 'qs';
+import nconf from 'nconf';
+import user from '../user';
+import categories from '../categories';
+import topics from '../topics';
+import meta from '../meta';
+import helpers from './helpers';
+import pagination from '../pagination';
+import privileges from '../privileges';
+import { Breadcrumbs, Pagination } from '../types';
+
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-const relative_path = nconf_1.default.get('relative_path');
-const canPostTopic = (uid) => __awaiter(void 0, void 0, void 0, function* () {
+const relative_path: string = nconf.get('relative_path');
+
+interface RecentRequest extends Request {
+  uid: number,
+  loggedIn: boolean
+}
+
+type FilterType = {
+    name: string,
+    url: string,
+    selected: string,
+    filter: string,
+    icon: string
+}
+
+type TermType = {
+    name: string,
+    url: string,
+    selected: string,
+    term: string,
+}
+
+type RecentDataType = {
+    title: string,
+    breadcrumbs: Breadcrumbs,
+    canPost: boolean,
+    showTopicTools: boolean,
+    showSelect: boolean,
+    allCategoriesUrl: string,
+    selectedCategory: string,
+    selectedCids: number[],
+    rssFeedUrl: string,
+    filters: FilterType[],
+    selectedFilter: FilterType,
+    terms: TermType[],
+    selectedTerm: TermType,
+    topicCount: number,
+    pagination: Pagination
+}
+
+const canPostTopic = async (uid: number): Promise<boolean> => {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    let cids = yield categories_1.default.getAllCidsFromSet('categories:cid');
+    let cids: number[] = await categories.getAllCidsFromSet('categories:cid');
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    cids = yield privileges_1.default.categories.filterCids('topics:create', cids, uid);
+    cids = await privileges.categories.filterCids('topics:create', cids, uid);
     return cids.length > 0;
-});
-const getData = (req, url, sort) => __awaiter(void 0, void 0, void 0, function* () {
+};
+
+export const getData = async (req: RecentRequest, url: string, sort: string): Promise<RecentDataType> => {
     const { originalUrl, loggedIn, query, uid, res } = req;
     const { cid, tags } = query;
-    const page = parseInt(query.page, 10) || 1;
+    const page: number = parseInt(query.page as string, 10) || 1;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-    let term = helpers_1.default.terms[query.term];
-    const filter = query.filter || '';
+    let term: string = helpers.terms[query.term];
+    const filter: ParsedQs[string] = query.filter || '';
+
     if (!term && query.term) {
         return null;
     }
     term = term || 'alltime';
+
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const [settings, categoryData, rssToken, canPost, isPrivileged] = yield Promise.all([
+    const [settings, categoryData, rssToken, canPost, isPrivileged] = await Promise.all([
         // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-        user_1.default.getSettings(uid),
-        helpers_1.default.getSelectedCategory(cid),
+        user.getSettings(uid),
+        helpers.getSelectedCategory(cid),
         // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-        user_1.default.auth.getFeedToken(uid),
+        user.auth.getFeedToken(uid),
         canPostTopic(uid),
-        user_1.default.isPrivileged(uid),
+        user.isPrivileged(uid),
     ]);
+
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const start = Math.max(0, (page - 1) * settings.topicsPerPage);
+    const start: number = Math.max(0, (page - 1) * settings.topicsPerPage);
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const stop = start + settings.topicsPerPage - 1;
+    const stop: number = start + (settings.topicsPerPage as number) - 1;
+
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-    const data = yield topics_1.default.getSortedTopics({
+    const data: RecentDataType = await topics.getSortedTopics({
         cids: cid,
         tags: tags,
         uid: uid,
@@ -68,55 +101,58 @@ const getData = (req, url, sort) => __awaiter(void 0, void 0, void 0, function* 
         floatPinned: query.pinned,
         query: query,
     });
+
     const isDisplayedAsHome = !(originalUrl.startsWith(`${relative_path}/api/${url}`) || originalUrl.startsWith(`${relative_path}/${url}`));
-    const baseUrl = isDisplayedAsHome ? '' : url;
+    const baseUrl: string = isDisplayedAsHome ? '' : url;
+
     if (isDisplayedAsHome) {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-        data.title = meta_1.default.config.homePageTitle || '[[pages:home]]';
-    }
-    else {
+        data.title = meta.config.homePageTitle || '[[pages:home]]';
+    } else {
         data.title = `[[pages:${url}]]`;
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        data.breadcrumbs = helpers_1.default.buildBreadcrumbs([{ text: `[[${url}:title]]` }]);
+        data.breadcrumbs = helpers.buildBreadcrumbs([{ text: `[[${url}:title]]` }]);
     }
+
     data.canPost = canPost;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     data.showSelect = isPrivileged;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     data.showTopicTools = isPrivileged;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    data.allCategoriesUrl = baseUrl + helpers_1.default.buildQueryString(query, 'cid', '');
+    data.allCategoriesUrl = baseUrl + helpers.buildQueryString(query, 'cid', '');
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
     data.selectedCategory = categoryData.selectedCategory;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
     data.selectedCids = categoryData.selectedCids;
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment
-    data['feeds:disableRSS'] = meta_1.default.config['feeds:disableRSS'] || 0;
+    data['feeds:disableRSS'] = meta.config['feeds:disableRSS'] || 0;
     data.rssFeedUrl = `${relative_path}/${url}.rss`;
     if (loggedIn) {
         // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
         data.rssFeedUrl += `?uid=${uid}&token=${rssToken}`;
     }
+
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-    data.filters = helpers_1.default.buildFilters(baseUrl, filter, query);
+    data.filters = helpers.buildFilters(baseUrl, filter, query);
     data.selectedFilter = data.filters.find(filter => filter && filter.selected);
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-    data.terms = helpers_1.default.buildTerms(baseUrl, term, query);
+    data.terms = helpers.buildTerms(baseUrl, term, query);
     data.selectedTerm = data.terms.find(term => term && term.selected);
+
     // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const pageCount = Math.max(1, Math.ceil(data.topicCount / settings.topicsPerPage));
+    const pageCount: number = Math.max(1, Math.ceil(data.topicCount / settings.topicsPerPage));
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-    data.pagination = pagination_1.default.create(page, pageCount, query);
+    data.pagination = pagination.create(page, pageCount, query);
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
-    helpers_1.default.addLinkTags({ url: url, res: res, tags: data.pagination.rel });
+    helpers.addLinkTags({ url: url, res: res, tags: data.pagination.rel });
     return data;
-});
-exports.getData = getData;
-const get = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    const data = yield (0, exports.getData)(req, 'recent', 'recent');
+};
+
+export const get = async (req: RecentRequest, res: Response<object, Locals>, next: NextFunction): Promise<void> => {
+    const data: RecentDataType = await getData(req, 'recent', 'recent');
     if (!data) {
         return next();
     }
     res.render('recent', data);
-});
-exports.get = get;
+};
