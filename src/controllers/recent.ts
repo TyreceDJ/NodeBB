@@ -35,7 +35,7 @@ type TermType = {
 
 type RecentDataType = {
     title: string,
-    breadcrumbs: string[],
+    breadcrumbs: Breadcrumbs,
     canPost: boolean,
     showTopicTools: boolean,
     showSelect: boolean,
